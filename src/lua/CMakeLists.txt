@@ -16,7 +16,6 @@ set(luamodules_SRC
     ${CMAKE_CURRENT_LIST_DIR}/modules/creature.cpp
     ${CMAKE_CURRENT_LIST_DIR}/modules/database.cpp
     ${CMAKE_CURRENT_LIST_DIR}/modules/game.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/modules/globalevent.cpp
     ${CMAKE_CURRENT_LIST_DIR}/modules/globals.cpp
     ${CMAKE_CURRENT_LIST_DIR}/modules/group.cpp
     ${CMAKE_CURRENT_LIST_DIR}/modules/guild.cpp

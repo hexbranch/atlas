@@ -17,9 +17,6 @@ local reloadTypes = {
 
 	["global"] = RELOAD_TYPE_GLOBAL,
 
-	["globalevent"] = RELOAD_TYPE_GLOBALEVENTS,
-	["globalevents"] = RELOAD_TYPE_GLOBALEVENTS,
-
 	["items"] = RELOAD_TYPE_ITEMS,
 
 	["monster"] = RELOAD_TYPE_MONSTERS,
@@ -61,7 +58,14 @@ function talkaction.onSay(player, words, param)
 	-- need to clear Event.data or we end up having duplicated events on /reload scripts
 	if table.contains({RELOAD_TYPE_SCRIPTS, RELOAD_TYPE_ALL}, reloadType) then
 		Event:clear()
+		if ScheduleEvent then
+			ScheduleEvent.clear()
+		end
 		Game.clearQuests()
+	end
+
+	if reloadType == RELOAD_TYPE_GLOBAL and ScheduleEvent then
+		ScheduleEvent.clear()
 	end
 
 	Game.reload(reloadType)

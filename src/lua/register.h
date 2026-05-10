@@ -12,7 +12,6 @@ void registerContainer(LuaScriptInterface& i);
 void registerCreature(LuaScriptInterface& i);
 void registerDatabase(LuaScriptInterface& i);
 void registerGame(LuaScriptInterface& i);
-void registerGlobalEvent(LuaScriptInterface& i);
 void registerGlobals(LuaScriptInterface& i);
 void registerGroup(LuaScriptInterface& i);
 void registerGuild(LuaScriptInterface& i);

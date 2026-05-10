@@ -4,7 +4,6 @@
 
 #include "../../configmanager.h"
 #include "../../events.h"
-#include "../../globalevent.h"
 #include "../../monster.h"
 #include "../../npc.h"
 #include "../../script.h"
@@ -17,7 +16,6 @@
 #include "../script.h"
 
 extern Game g_game;
-extern GlobalEvents* g_globalEvents;
 extern LuaEnvironment g_luaEnvironment;
 extern Spells* g_spells;
 extern Monsters g_monsters;
@@ -559,20 +557,6 @@ int luaGameCreateMonsterType(lua_State* L)
 	return 1;
 }
 
-int luaGameStartEvent(lua_State* L)
-{
-	// Game.startEvent(event)
-	const std::string& eventName = tfs::lua::getString(L, 1);
-
-	const auto& eventMap = g_globalEvents->getEventMap(GLOBALEVENT_TIMER);
-	if (auto it = eventMap.find(eventName); it != eventMap.end()) {
-		tfs::lua::pushBoolean(L, it->second.executeEvent());
-	} else {
-		lua_pushnil(L);
-	}
-	return 1;
-}
-
 int luaGameGetClientVersion(lua_State* L)
 {
 	// Game.getClientVersion()
@@ -675,8 +659,6 @@ void tfs::lua::registerGame(LuaScriptInterface& lsi)
 	lsi.registerMethod("Game", "createNpc", luaGameCreateNpc);
 	lsi.registerMethod("Game", "createTile", luaGameCreateTile);
 	lsi.registerMethod("Game", "createMonsterType", luaGameCreateMonsterType);
-
-	lsi.registerMethod("Game", "startEvent", luaGameStartEvent);
 
 	lsi.registerMethod("Game", "getClientVersion", luaGameGetClientVersion);
 

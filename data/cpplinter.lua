@@ -83,7 +83,6 @@ configManager = {}
 ---@field createNpc fun(name: string, position: Position, extended?: boolean, force?: boolean, magicEffect?: MagicEffect_t): Npc
 ---@field createTile fun(position: Position): Tile
 ---@field createMonsterType fun(name: string): MonsterType
----@field startEvent fun(eventName: string): boolean
 ---@field getClientVersion fun(): string
 ---@field reload fun(reloadType: number): boolean
 ---@field getPlayerRecord fun(): integer
@@ -956,20 +955,6 @@ TalkAction = {}
 ---@operator call():MoveEvent
 MoveEvent = {}
 
--- MARK: GlobalEvent
----@class GlobalEvent
----@field type fun(self:GlobalEvent, callback:string):boolean
----@field register fun(self:GlobalEvent):boolean
----```diff
----+ Establece la hora con HH:MM:SS, por ejemplo:00:00:00
----
----@field time fun(self:GlobalEvent, time:string):boolean -- "hh:mm:ss"
----@field interval fun(self:GlobalEvent, interval:integer):boolean
----@field onThink fun(interval:integer):boolean
----@field onTime fun(interval:integer):boolean
----@operator call(string):GlobalEvent
-GlobalEvent = {}
-
 -- MARK: Weapon
 ---@class Weapon
 ---@field action fun(self:Weapon, callback:string):boolean
@@ -1063,6 +1048,14 @@ Weapon = {}
 ---@field onMonsterSpawn fun(monster:Monster, position:Position, startup:boolean, artificial:boolean):nil
 ---@operator call():Event
 Event = {}
+
+-- MARK: ScheduleEvent
+---@class ScheduleEvent
+---@field time number|string|table<number, number|string|string[]> Interval(ms), "HH:MM:SS" string, or table mapping weekday constants to intervals or time string(s)
+---@field onTrigger fun():nil Callback function executed when the event triggers
+---@field register fun(self:ScheduleEvent):boolean Registers the event, returns true if successful
+---@operator call(number|string|table<number, number|string|string[]>):ScheduleEvent Creates a new ScheduleEvent instance
+ScheduleEvent = {}
 
 -- MARK: Thing
 ---@class Thing
@@ -1867,16 +1860,15 @@ RELOAD_TYPE_CHAT = 2
 RELOAD_TYPE_CONFIG = 3
 RELOAD_TYPE_EVENTS = 4
 RELOAD_TYPE_GLOBAL = 5
-RELOAD_TYPE_GLOBALEVENTS = 6
-RELOAD_TYPE_ITEMS = 7
-RELOAD_TYPE_MONSTERS = 8
-RELOAD_TYPE_MOVEMENTS = 9
-RELOAD_TYPE_NPCS = 10
-RELOAD_TYPE_QUESTS = 11
-RELOAD_TYPE_SCRIPTS = 12
-RELOAD_TYPE_SPELLS = 13
-RELOAD_TYPE_TALKACTIONS = 14
-RELOAD_TYPE_WEAPONS = 15
+RELOAD_TYPE_ITEMS = 6
+RELOAD_TYPE_MONSTERS = 7
+RELOAD_TYPE_MOVEMENTS = 8
+RELOAD_TYPE_NPCS = 9
+RELOAD_TYPE_QUESTS = 10
+RELOAD_TYPE_SCRIPTS = 11
+RELOAD_TYPE_SPELLS = 12
+RELOAD_TYPE_TALKACTIONS = 13
+RELOAD_TYPE_WEAPONS = 14
 
 PlayerFlag_CannotUseCombat = 1 * 2 ^ 0
 PlayerFlag_CannotAttackPlayer = 1 * 2 ^ 1

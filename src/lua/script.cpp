@@ -7,7 +7,6 @@
 #include "../configmanager.h"
 #include "../events.h"
 #include "../game.h"
-#include "../globalevent.h"
 #include "../item.h"
 #include "../movement.h"
 #include "../player.h"
@@ -25,7 +24,6 @@
 
 extern Chat g_chat;
 extern Game g_game;
-extern GlobalEvents* g_globalEvents;
 extern Monsters g_monsters;
 extern Vocations g_vocations;
 extern Spells* g_spells;
