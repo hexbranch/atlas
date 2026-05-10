@@ -83,6 +83,15 @@ public:
 
 	virtual std::unique_ptr<Condition> clone() const = 0;
 
+	virtual class ConditionSpeed* getConditionSpeed() { return nullptr; }
+	virtual const class ConditionSpeed* getConditionSpeed() const { return nullptr; }
+	virtual class ConditionOutfit* getConditionOutfit() { return nullptr; }
+	virtual const class ConditionOutfit* getConditionOutfit() const { return nullptr; }
+	virtual class ConditionDamage* getConditionDamage() { return nullptr; }
+	virtual const class ConditionDamage* getConditionDamage() const { return nullptr; }
+	virtual class ConditionManaShield* getConditionManaShield() { return nullptr; }
+	virtual const class ConditionManaShield* getConditionManaShield() const { return nullptr; }
+
 	ConditionType_t getType() const { return conditionType; }
 	int64_t getEndTime() const { return endTime; }
 	int32_t getTicks() const { return ticks; }
@@ -263,6 +272,8 @@ public:
 	uint64_t getIcons() const override;
 
 	std::unique_ptr<Condition> clone() const override { return std::make_unique<ConditionDamage>(*this); }
+	ConditionDamage* getConditionDamage() override { return this; }
+	const ConditionDamage* getConditionDamage() const override { return this; }
 
 	bool setParam(ConditionParam_t param, int32_t value) override;
 	int32_t getParam(ConditionParam_t param) override;
@@ -316,6 +327,8 @@ public:
 	uint64_t getIcons() const override;
 
 	std::unique_ptr<Condition> clone() const override { return std::make_unique<ConditionSpeed>(*this); }
+	ConditionSpeed* getConditionSpeed() override { return this; }
+	const ConditionSpeed* getConditionSpeed() const override { return this; }
 
 	bool setParam(ConditionParam_t param, int32_t value) override;
 	int32_t getParam(ConditionParam_t param) override;
@@ -350,6 +363,8 @@ public:
 	void addCondition(const std::shared_ptr<Creature>& creature, const Condition* condition) override;
 
 	std::unique_ptr<Condition> clone() const override { return std::make_unique<ConditionOutfit>(*this); }
+	ConditionOutfit* getConditionOutfit() override { return this; }
+	const ConditionOutfit* getConditionOutfit() const override { return this; }
 
 	void setOutfit(const Outfit_t& outfit);
 
@@ -459,6 +474,8 @@ public:
 	bool setParam(ConditionParam_t param, int32_t value) override;
 
 	std::unique_ptr<Condition> clone() const override { return std::make_unique<ConditionManaShield>(*this); }
+	ConditionManaShield* getConditionManaShield() override { return this; }
+	const ConditionManaShield* getConditionManaShield() const override { return this; }
 
 	// serialization
 	void serialize(PropWriteStream& propWriteStream) override;
