@@ -15,7 +15,7 @@ int luaConditionCreate(lua_State* L)
 	ConditionType_t conditionType = tfs::lua::getNumber<ConditionType_t>(L, 2);
 	ConditionId_t conditionId = tfs::lua::getNumber<ConditionId_t>(L, 3, CONDITIONID_COMBAT);
 
-	auto condition = Condition::createCondition(conditionId, conditionType, 0, 0);
+	auto condition = Condition::createCondition(conditionId, conditionType, std::chrono::milliseconds::zero(), 0);
 	if (condition) {
 		tfs::lua::pushUserdata(L, condition.release());
 		tfs::lua::setMetatable(L, -1, "Condition");
@@ -89,7 +89,14 @@ int luaConditionGetEndTime(lua_State* L)
 	// condition:getEndTime()
 	Condition* condition = tfs::lua::getUserdata<Condition>(L, 1);
 	if (condition) {
-		tfs::lua::pushNumber(L, condition->getEndTime());
+		const auto endTime = condition->getEndTime();
+		if (endTime == std::chrono::steady_clock::time_point::min() ||
+		    endTime == std::chrono::steady_clock::time_point::max()) {
+			tfs::lua::pushNumber(L, 0);
+		} else {
+			const auto wallEndTime = std::chrono::system_clock::now() + (endTime - std::chrono::steady_clock::now());
+			tfs::lua::pushNumber(L, duration_cast<std::chrono::milliseconds>(wallEndTime.time_since_epoch()).count());
+		}
 	} else {
 		lua_pushnil(L);
 	}
@@ -114,7 +121,7 @@ int luaConditionGetTicks(lua_State* L)
 	// condition:getTicks()
 	Condition* condition = tfs::lua::getUserdata<Condition>(L, 1);
 	if (condition) {
-		tfs::lua::pushNumber(L, condition->getTicks());
+		tfs::lua::pushNumber(L, condition->getTicks().count());
 	} else {
 		lua_pushnil(L);
 	}
@@ -124,7 +131,7 @@ int luaConditionGetTicks(lua_State* L)
 int luaConditionSetTicks(lua_State* L)
 {
 	// condition:setTicks(ticks)
-	int32_t ticks = tfs::lua::getNumber<int32_t>(L, 2);
+	auto ticks = std::chrono::milliseconds{tfs::lua::getNumber<int32_t>(L, 2)};
 	Condition* condition = tfs::lua::getUserdata<Condition>(L, 1);
 	if (condition) {
 		condition->setTicks(ticks);
@@ -226,7 +233,7 @@ int luaConditionAddDamage(lua_State* L)
 {
 	// condition:addDamage(rounds, time, value)
 	int32_t value = tfs::lua::getNumber<int32_t>(L, 4);
-	int32_t time = tfs::lua::getNumber<int32_t>(L, 3);
+	auto time = std::chrono::milliseconds{tfs::lua::getNumber<int32_t>(L, 3)};
 	int32_t rounds = tfs::lua::getNumber<int32_t>(L, 2);
 	Condition* conditionBase = tfs::lua::getUserdata<Condition>(L, 1);
 	ConditionDamage* condition = conditionBase ? conditionBase->getConditionDamage() : nullptr;

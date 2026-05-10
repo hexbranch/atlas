@@ -25,8 +25,8 @@ extern Scheduler g_scheduler;
 
 namespace {
 
-std::deque<std::pair<int64_t, uint32_t>> waitList; // (timeout, player guid)
-auto priorityEnd = waitList.end();
+std::deque<std::pair<std::chrono::steady_clock::time_point, uint32_t>> waitList; // (timeout, player guid)
+std::size_t premiumCount = 0;
 
 auto findClient(uint32_t guid)
 {
@@ -39,24 +39,19 @@ auto findClient(uint32_t guid)
 	return std::make_pair(waitList.end(), slot);
 }
 
-constexpr int64_t getWaitTime(std::size_t slot)
+constexpr auto getWaitTime(std::size_t slot)
 {
-	if (slot < 5) {
-		return 5;
-	} else if (slot < 10) {
-		return 10;
-	} else if (slot < 20) {
-		return 20;
-	} else if (slot < 50) {
-		return 60;
-	}
-	return 120;
+	if (slot < 5) return 5s;
+	if (slot < 10) return 10s;
+	if (slot < 20) return 20s;
+	if (slot < 50) return 60s;
+	return 120s;
 }
 
-constexpr int64_t getTimeout(std::size_t slot)
+constexpr auto getTimeout(std::size_t slot)
 {
 	// timeout is set to 15 seconds longer than expected retry attempt
-	return getWaitTime(slot) + 15;
+	return getWaitTime(slot) + 15s;
 }
 
 std::size_t clientLogin(const Player& player)
@@ -70,14 +65,19 @@ std::size_t clientLogin(const Player& player)
 		return 0;
 	}
 
-	int64_t time = OTSYS_TIME();
+	auto time = std::chrono::steady_clock::now();
 
 	auto it = waitList.begin();
+	std::size_t index = 0;
 	while (it != waitList.end()) {
-		if ((it->first - time) <= 0) {
+		if ((it->first - time) <= std::chrono::seconds::zero()) {
+			if (index < premiumCount) {
+				--premiumCount;
+			}
 			it = waitList.erase(it);
 		} else {
 			++it;
+			++index;
 		}
 	}
 
@@ -86,21 +86,26 @@ std::size_t clientLogin(const Player& player)
 	if (it != waitList.end()) {
 		// If server has capacity for this client, let him in even though his current slot might be higher than 0.
 		if ((g_game.getPlayersOnline() + slot) <= maxPlayers) {
+			if (slot <= premiumCount) {
+				--premiumCount;
+			}
 			waitList.erase(it);
 			return 0;
 		}
 
 		// let them wait a bit longer
-		it->first = time + (getTimeout(slot) * 1000);
+		it->first = time + getTimeout(slot);
 		return slot;
 	}
 
 	if (player.isPremium()) {
-		priorityEnd = waitList.emplace(priorityEnd, time + (getTimeout(slot + 1) * 1000), player.getGUID());
-		return std::distance(waitList.begin(), priorityEnd);
+		const std::size_t premiumSlot = premiumCount + 1;
+		waitList.emplace(waitList.begin() + premiumCount, time + getTimeout(premiumSlot), player.getGUID());
+		++premiumCount;
+		return premiumSlot;
 	}
 
-	waitList.emplace_back(time + (getTimeout(waitList.size() + 1) * 1000), player.getGUID());
+	waitList.emplace_back(time + getTimeout(waitList.size() + 1), player.getGUID());
 	return waitList.size();
 }
 
@@ -195,7 +200,7 @@ void ProtocolGame::login(uint32_t characterId, uint32_t accountId, OperatingSyst
 
 		if (!player->hasFlag(PlayerFlag_CannotBeBanned)) {
 			if (const auto& banInfo = IOBan::getAccountBanInfo(accountId)) {
-				if (banInfo->expiresAt > 0) {
+				if (banInfo->expiresAt != std::chrono::system_clock::time_point::min()) {
 					disconnectClient(
 					    std::format("Your account has been banned until {:s} by {:s}.\n\nReason specified:\n{:s}",
 					                formatDateShort(banInfo->expiresAt), banInfo->bannedBy, banInfo->reason));
@@ -209,12 +214,12 @@ void ProtocolGame::login(uint32_t characterId, uint32_t accountId, OperatingSyst
 		}
 
 		if (std::size_t currentSlot = clientLogin(*player)) {
-			uint8_t retryTime = getWaitTime(currentSlot);
+			auto retryTime = getWaitTime(currentSlot);
 			auto output = tfs::net::make_output_message();
 			output->addByte(0x16);
 			output->addString(
 			    std::format("Too many players online.\nYou are at place {:d} on the waiting list.", currentSlot));
-			output->addByte(retryTime);
+			output->addByte(retryTime.count());
 			send(output);
 
 			disconnect();
@@ -236,7 +241,7 @@ void ProtocolGame::login(uint32_t characterId, uint32_t accountId, OperatingSyst
 		}
 
 		player->lastIP = player->getIP();
-		player->lastLoginSaved = std::max<time_t>(time(nullptr), player->lastLoginSaved + 1);
+		player->lastLoginSaved = std::max(std::chrono::system_clock::now(), player->lastLoginSaved + 1s);
 		acceptPackets = true;
 	} else {
 		if (eventConnect != 0 || !getBoolean(ConfigManager::REPLACE_KICK_ON_LOGIN)) {
@@ -249,8 +254,8 @@ void ProtocolGame::login(uint32_t characterId, uint32_t accountId, OperatingSyst
 			foundPlayer->disconnect();
 
 			eventConnect = g_scheduler.addEvent(createSchedulerTask(
-			    1000, [=, self = std::static_pointer_cast<ProtocolGame>(shared_from_this()),
-			           playerID = foundPlayer->getID()]() { self->connect(playerID, operatingSystem); }));
+			    1s, [=, self = std::static_pointer_cast<ProtocolGame>(shared_from_this()),
+			         playerID = foundPlayer->getID()]() { self->connect(playerID, operatingSystem); }));
 		} else {
 			connect(foundPlayer->getID(), operatingSystem);
 		}
@@ -285,7 +290,7 @@ void ProtocolGame::connect(uint32_t playerId, OperatingSystem_t operatingSystem)
 	player->client = std::static_pointer_cast<ProtocolGame>(shared_from_this());
 	player->onCreatureAppear(player, false, CONST_ME_NONE);
 	player->lastIP = player->getIP();
-	player->lastLoginSaved = std::max<time_t>(time(nullptr), player->lastLoginSaved + 1);
+	player->lastLoginSaved = std::max(std::chrono::system_clock::now(), player->lastLoginSaved + 1s);
 	player->resetIdleTime();
 	acceptPackets = true;
 
@@ -411,7 +416,7 @@ void ProtocolGame::onRecvFirstMessage(NetworkMessage& msg)
 	}
 
 	auto characterName = msg.getString();
-	uint32_t timeStamp = msg.get<uint32_t>();
+	auto timeStamp = std::chrono::system_clock::time_point{std::chrono::seconds{msg.get<uint32_t>()}};
 	uint8_t randNumber = msg.getByte();
 	if (challengeTimestamp != timeStamp || challengeRandom != randNumber) {
 		disconnect();
@@ -490,8 +495,8 @@ void ProtocolGame::onConnect()
 	output->addByte(0x1F);
 
 	// Add timestamp & random number
-	challengeTimestamp = static_cast<uint32_t>(time(nullptr));
-	output->add<uint32_t>(challengeTimestamp);
+	challengeTimestamp = floor<std::chrono::seconds>(std::chrono::system_clock::now());
+	output->add<uint32_t>(duration_cast<std::chrono::seconds>(challengeTimestamp.time_since_epoch()).count());
 
 	challengeRandom = randNumber(generator);
 	output->addByte(challengeRandom);
@@ -1448,7 +1453,7 @@ void ProtocolGame::parseMarketCreateOffer(NetworkMessage& msg)
 
 void ProtocolGame::parseMarketCancelOffer(NetworkMessage& msg)
 {
-	uint32_t timestamp = msg.get<uint32_t>();
+	auto timestamp = std::chrono::system_clock::time_point{std::chrono::seconds{msg.get<uint32_t>()}};
 	uint16_t counter = msg.get<uint16_t>();
 
 	g_dispatcher.addTask(
@@ -1460,7 +1465,7 @@ void ProtocolGame::parseMarketCancelOffer(NetworkMessage& msg)
 
 void ProtocolGame::parseMarketAcceptOffer(NetworkMessage& msg)
 {
-	uint32_t timestamp = msg.get<uint32_t>();
+	auto timestamp = std::chrono::system_clock::time_point{std::chrono::seconds{msg.get<uint32_t>()}};
 	uint16_t counter = msg.get<uint16_t>();
 	uint16_t amount = msg.get<uint16_t>();
 	g_dispatcher.addTask(
@@ -1670,7 +1675,9 @@ void ProtocolGame::sendBasicData()
 	msg.addByte(0x9F);
 	if (player->isPremium()) {
 		msg.addByte(1);
-		msg.add<uint32_t>(getBoolean(ConfigManager::FREE_PREMIUM) ? 0 : player->premiumEndsAt);
+		msg.add<uint32_t>(getBoolean(ConfigManager::FREE_PREMIUM)
+		                      ? 0
+		                      : duration_cast<std::chrono::seconds>(player->premiumEndsAt.time_since_epoch()).count());
 	} else {
 		msg.addByte(0);
 		msg.add<uint32_t>(0);
@@ -2116,7 +2123,7 @@ void ProtocolGame::sendMarketBrowseItem(uint16_t itemId, const MarketOfferList& 
 
 	msg.add<uint32_t>(buyOffers.size());
 	for (const MarketOffer& offer : buyOffers) {
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.add<uint16_t>(offer.amount);
 		msg.add<uint64_t>(offer.price);
@@ -2125,7 +2132,7 @@ void ProtocolGame::sendMarketBrowseItem(uint16_t itemId, const MarketOfferList& 
 
 	msg.add<uint32_t>(sellOffers.size());
 	for (const MarketOffer& offer : sellOffers) {
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.add<uint16_t>(offer.amount);
 		msg.add<uint64_t>(offer.price);
@@ -2147,7 +2154,7 @@ void ProtocolGame::sendMarketAcceptOffer(const MarketOfferEx& offer)
 
 	if (offer.type == MARKETACTION_BUY) {
 		msg.add<uint32_t>(0x01);
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.add<uint16_t>(offer.amount);
 		msg.add<uint64_t>(offer.price);
@@ -2156,7 +2163,7 @@ void ProtocolGame::sendMarketAcceptOffer(const MarketOfferEx& offer)
 	} else {
 		msg.add<uint32_t>(0x00);
 		msg.add<uint32_t>(0x01);
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.add<uint16_t>(offer.amount);
 		msg.add<uint64_t>(offer.price);
@@ -2174,7 +2181,7 @@ void ProtocolGame::sendMarketBrowseOwnOffers(const MarketOfferList& buyOffers, c
 
 	msg.add<uint32_t>(buyOffers.size());
 	for (const MarketOffer& offer : buyOffers) {
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.addItemId(offer.itemId);
 		if (Item::items[offer.itemId].classification > 0) {
@@ -2186,7 +2193,7 @@ void ProtocolGame::sendMarketBrowseOwnOffers(const MarketOfferList& buyOffers, c
 
 	msg.add<uint32_t>(sellOffers.size());
 	for (const MarketOffer& offer : sellOffers) {
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.addItemId(offer.itemId);
 		if (Item::items[offer.itemId].classification > 0) {
@@ -2207,7 +2214,7 @@ void ProtocolGame::sendMarketCancelOffer(const MarketOfferEx& offer)
 
 	if (offer.type == MARKETACTION_BUY) {
 		msg.add<uint32_t>(0x01);
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.addItemId(offer.itemId);
 		if (Item::items[offer.itemId].classification > 0) {
@@ -2219,7 +2226,7 @@ void ProtocolGame::sendMarketCancelOffer(const MarketOfferEx& offer)
 	} else {
 		msg.add<uint32_t>(0x00);
 		msg.add<uint32_t>(0x01);
-		msg.add<uint32_t>(offer.timestamp);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(offer.timestamp.time_since_epoch()).count());
 		msg.add<uint16_t>(offer.counter);
 		msg.addItemId(offer.itemId);
 		if (Item::items[offer.itemId].classification > 0) {
@@ -2248,8 +2255,8 @@ void ProtocolGame::sendMarketBrowseOwnHistory(const HistoryMarketOfferList& buyO
 
 	msg.add<uint32_t>(buyOffersToSend);
 	for (auto it = buyOffers.begin(); i < buyOffersToSend; ++it, ++i) {
-		msg.add<uint32_t>(it->timestamp);
-		msg.add<uint16_t>(counterMap[it->timestamp]++);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(it->timestamp.time_since_epoch()).count());
+		msg.add<uint16_t>(counterMap[duration_cast<std::chrono::seconds>(it->timestamp.time_since_epoch()).count()]++);
 		msg.addItemId(it->itemId);
 		if (Item::items[it->itemId].classification > 0) {
 			msg.addByte(0);
@@ -2264,8 +2271,8 @@ void ProtocolGame::sendMarketBrowseOwnHistory(const HistoryMarketOfferList& buyO
 
 	msg.add<uint32_t>(sellOffersToSend);
 	for (auto it = sellOffers.begin(); i < sellOffersToSend; ++it, ++i) {
-		msg.add<uint32_t>(it->timestamp);
-		msg.add<uint16_t>(counterMap[it->timestamp]++);
+		msg.add<uint32_t>(duration_cast<std::chrono::seconds>(it->timestamp.time_since_epoch()).count());
+		msg.add<uint16_t>(counterMap[duration_cast<std::chrono::seconds>(it->timestamp.time_since_epoch()).count()]++);
 		msg.addItemId(it->itemId);
 		if (Item::items[it->itemId].classification > 0) {
 			msg.addByte(0);
@@ -2910,9 +2917,8 @@ void ProtocolGame::sendTextWindow(uint32_t windowTextId, const std::shared_ptr<c
 
 	msg.addByte(0x00); // "(traded)" suffix after player name (bool)
 
-	time_t writtenDate = item->getDate();
-	if (writtenDate != 0) {
-		msg.addString(formatDateShort(writtenDate));
+	if (const auto writtenDate = item->getDate()) {
+		msg.addString(formatDateShort(*writtenDate));
 	} else {
 		msg.add<uint16_t>(0x00);
 	}
@@ -2994,9 +3000,9 @@ void ProtocolGame::sendVIP(uint32_t guid, const std::string& name, const std::st
 
 void ProtocolGame::sendVIPEntries()
 {
-	const std::forward_list<VIPEntry>& vipEntries = IOLoginData::getVIPEntries(player->getAccount());
+	const auto& vipEntries = IOLoginData::getVIPEntries(player->getAccount());
 
-	for (const VIPEntry& entry : vipEntries) {
+	for (const auto& entry : vipEntries) {
 		const auto& vipPlayer = g_game.getPlayerByGUID(entry.guid);
 		VipStatus_t vipStatus = vipPlayer && player->canSeeCreature(vipPlayer) ? VIPSTATUS_ONLINE : VIPSTATUS_OFFLINE;
 
@@ -3033,29 +3039,29 @@ void ProtocolGame::sendItemClasses()
 	writeToOutputBuffer(msg);
 }
 
-void ProtocolGame::sendSpellCooldown(uint16_t spellId, uint32_t time)
+void ProtocolGame::sendSpellCooldown(uint16_t spellId, std::chrono::milliseconds time)
 {
 	NetworkMessage msg;
 	msg.addByte(0xA4);
 	msg.add<uint16_t>(spellId);
-	msg.add<uint32_t>(time);
+	msg.add<uint32_t>(time.count());
 	writeToOutputBuffer(msg);
 }
 
-void ProtocolGame::sendSpellGroupCooldown(SpellGroup_t groupId, uint32_t time)
+void ProtocolGame::sendSpellGroupCooldown(SpellGroup_t groupId, std::chrono::milliseconds time)
 {
 	NetworkMessage msg;
 	msg.addByte(0xA5);
 	msg.addByte(groupId);
-	msg.add<uint32_t>(time);
+	msg.add<uint32_t>(time.count());
 	writeToOutputBuffer(msg);
 }
 
-void ProtocolGame::sendUseItemCooldown(uint32_t time)
+void ProtocolGame::sendUseItemCooldown(std::chrono::milliseconds time)
 {
 	NetworkMessage msg;
 	msg.addByte(0xA6);
-	msg.add<uint32_t>(time);
+	msg.add<uint32_t>(time.count());
 	writeToOutputBuffer(msg);
 }
 
@@ -3243,9 +3249,9 @@ void ProtocolGame::AddPlayerStats(NetworkMessage& msg)
 	msg.add<uint16_t>(player->getBaseSpeed());
 
 	Condition* condition = player->getCondition(CONDITION_REGENERATION, CONDITIONID_DEFAULT);
-	msg.add<uint16_t>(condition ? condition->getTicks() / 1000 : 0x00);
+	msg.add<uint16_t>(condition ? duration_cast<std::chrono::seconds>(condition->getTicks()).count() : 0x00);
 
-	msg.add<uint16_t>(player->getOfflineTrainingTime() / 60 / 1000);
+	msg.add<uint16_t>(floor<std::chrono::minutes>(player->getOfflineTrainingTime()).count());
 
 	msg.add<uint16_t>(0); // xp boost time (seconds)
 	msg.addByte(0x01);    // 15.11: always enable exp boost in store
