@@ -1266,7 +1266,7 @@ ReturnValue Game::internalMoveItem(std::shared_ptr<Thing> fromThing, std::shared
 	if (moveItem && moveItem->getDuration() > std::chrono::milliseconds::zero()) {
 		if (moveItem->getDecaying() != DECAYING_TRUE) {
 			moveItem->setDecaying(DECAYING_TRUE);
-			toDecayItems.push_back(moveItem);
+			toDecayItems.push_back({moveItem, moveItem->getDecayGeneration()});
 		}
 	}
 
@@ -1364,7 +1364,7 @@ ReturnValue Game::internalAddItem(const std::shared_ptr<Thing>& toThing, const s
 	if (item->getDuration() > std::chrono::milliseconds::zero()) {
 		if (item->getDecaying() != DECAYING_TRUE) {
 			item->setDecaying(DECAYING_TRUE);
-			toDecayItems.push_back(item);
+			toDecayItems.push_back({item, item->getDecayGeneration()});
 		}
 	}
 
@@ -1408,9 +1408,6 @@ ReturnValue Game::internalRemoveItem(const std::shared_ptr<Item>& item, int32_t 
 
 		if (item->isRemoved()) {
 			item->onRemoved();
-			if (item->canDecay()) {
-				decayItems->remove_if([&item](const auto& decayItem) { return decayItem.lock() == item; });
-			}
 		}
 
 		parent->postRemoveNotification(item, nullptr, index);
@@ -1715,7 +1712,7 @@ std::shared_ptr<Item> Game::transformItem(const std::shared_ptr<Item>& item, uin
 	if (newItem->getDuration() > std::chrono::milliseconds::zero()) {
 		if (newItem->getDecaying() != DECAYING_TRUE) {
 			newItem->setDecaying(DECAYING_TRUE);
-			toDecayItems.push_back(newItem);
+			toDecayItems.push_back({newItem, newItem->getDecayGeneration()});
 		}
 	}
 
@@ -4504,7 +4501,11 @@ void Game::startDecay(const std::shared_ptr<Item>& item)
 
 	if (item->getDuration() > std::chrono::milliseconds::zero()) {
 		item->setDecaying(DECAYING_TRUE);
-		toDecayItems.push_back(item);
+		// The decay clock starts when cleanup() promotes the item from
+		// toDecayItems into the wheel — not here. Otherwise items registered
+		// during map load would silently lose duration before the scheduler
+		// has even started (a 30s boot can fully consume a splash/field).
+		toDecayItems.push_back({item, item->getDecayGeneration()});
 	} else {
 		internalDecayItem(item);
 	}
@@ -4531,49 +4532,113 @@ void Game::internalDecayItem(const std::shared_ptr<Item>& item)
 
 void Game::checkDecay()
 {
-	g_scheduler.addEvent(createSchedulerTask(EVENT_DECAYINTERVAL, [this]() { checkDecay(); }));
-	size_t bucket = (lastBucket + 1) % EVENT_DECAY_BUCKETS;
-
-	auto& decayItemBucket = decayItems[bucket];
-	auto it = decayItemBucket.begin();
-	while (it != decayItemBucket.end()) {
-		const auto item = it->lock();
-		if (!item) {
-			it = decayItemBucket.erase(it);
-			continue;
-		}
-
-		if (!item->canDecay()) {
-			item->setDecaying(DECAYING_FALSE);
-			it = decayItemBucket.erase(it);
-			continue;
-		}
-
-		auto duration = item->getDuration();
-		auto decreaseTime = std::min(EVENT_DECAYINTERVAL * EVENT_DECAY_BUCKETS, duration);
-
-		duration -= decreaseTime;
-		item->decreaseDuration(decreaseTime);
-
-		if (duration <= std::chrono::milliseconds::zero()) {
-			it = decayItems[bucket].erase(it);
-			internalDecayItem(item);
-		} else if (duration < EVENT_DECAYINTERVAL * EVENT_DECAY_BUCKETS) {
-			it = decayItems[bucket].erase(it);
-			size_t newBucket =
-			    (bucket + duration_cast<std::chrono::seconds>(duration + EVENT_DECAYINTERVAL / 2).count()) %
-			    EVENT_DECAY_BUCKETS;
-			if (newBucket == bucket) {
-				internalDecayItem(item);
-			} else {
-				decayItems[newBucket].push_back(item);
-			}
-		} else {
-			++it;
-		}
+	auto now = std::chrono::steady_clock::now();
+	if (nextDecayTick == std::chrono::steady_clock::time_point{}) {
+		nextDecayTick = now;
 	}
 
-	lastBucket = bucket;
+	// Catch up: if scheduler ran late, advance multiple buckets so the wheel
+	// stays aligned with wall-clock time instead of accumulating drift.
+	size_t bucketsToProcess = 1;
+	auto lag = now - nextDecayTick;
+	if (lag >= EVENT_DECAYINTERVAL) {
+		bucketsToProcess = 1 + static_cast<size_t>(lag / EVENT_DECAYINTERVAL);
+		bucketsToProcess = std::min(bucketsToProcess, static_cast<size_t>(EVENT_DECAY_BUCKETS));
+	}
+	nextDecayTick += EVENT_DECAYINTERVAL * bucketsToProcess;
+
+	auto delay = nextDecayTick - now;
+	if (delay <= std::chrono::milliseconds::zero()) {
+		delay = EVENT_DECAYINTERVAL;
+		nextDecayTick = now + EVENT_DECAYINTERVAL;
+	}
+	g_scheduler.addEvent(
+	    createSchedulerTask(std::chrono::duration_cast<std::chrono::milliseconds>(delay), [this]() { checkDecay(); }));
+
+	// Items queued by gameplay since the last tick (internalMoveItem, clone, ...)
+	// must NOT be drained by the per-bucket cleanup() inside the catch-up loop:
+	// with a small `ticks` they land just ahead of `lastBucket` and the remaining
+	// catch-up iterations would revisit them every tick, re-arming markDecayStart
+	// each time. That makes a short-lived item chase the loop and lose all the
+	// catch-up's virtual time. Snapshot them here and promote them once, after
+	// the loop, anchored at the final lastBucket. The per-bucket cleanup() then
+	// only sees successors that internalDecayItem enqueues for the bucket being
+	// processed (the chained-decay alignment the per-bucket drain is meant for).
+	auto preExisting = std::exchange(toDecayItems, {});
+
+	// Virtual time tracks where the wheel "should be" at each bucket. During
+	// catch-up, real time barely advances between iterations, but each bucket
+	// represents one EVENT_DECAYINTERVAL of virtual time. Using virtualNow for
+	// markDecayStart ensures getDuration() on successors properly consumes the
+	// virtual time that has passed, so chained decays expire on schedule.
+	auto virtualNow = now - (EVENT_DECAYINTERVAL * (bucketsToProcess - 1));
+
+	for (size_t i = 0; i < bucketsToProcess; ++i) {
+		size_t bucket = (lastBucket + 1) % EVENT_DECAY_BUCKETS;
+
+		auto& decayItemBucket = decayItems[bucket];
+		auto it = decayItemBucket.begin();
+		while (it != decayItemBucket.end()) {
+			const auto item = it->item.lock();
+			if (!item) {
+				it = decayItemBucket.erase(it);
+				continue;
+			}
+
+			// Stale entry: the item was rescheduled (Lua duration change, etc.)
+			// and a fresh entry exists in another bucket. Drop this one.
+			if (it->generation != item->getDecayGeneration()) {
+				it = decayItemBucket.erase(it);
+				continue;
+			}
+
+			if (!item->canDecay()) {
+				item->flushDecayDuration();
+				item->removeAttribute(ITEM_ATTRIBUTE_DECAYSTATE);
+				it = decayItemBucket.erase(it);
+				continue;
+			}
+
+			item->flushDecayDuration();
+			auto duration = item->getDuration();
+
+			if (duration <= std::chrono::milliseconds::zero()) {
+				it = decayItems[bucket].erase(it);
+				internalDecayItem(item);
+			} else if (duration < EVENT_DECAYINTERVAL * EVENT_DECAY_BUCKETS) {
+				it = decayItems[bucket].erase(it);
+				// Use real time here: flushDecayDuration() already consumed the
+				// real elapsed time, so `duration` is the true remaining value
+				// measured against `now`. Re-arming with virtualNow (in the past)
+				// would cause a subsequent catch-up bucket to double-count the lag.
+				item->markDecayStart(now);
+				size_t ticks =
+				    std::min(static_cast<size_t>((duration + EVENT_DECAYINTERVAL - 1ms) / EVENT_DECAYINTERVAL),
+				             static_cast<size_t>(EVENT_DECAY_BUCKETS - 1));
+				decayItems[(bucket + ticks) % EVENT_DECAY_BUCKETS].push_back({item, item->getDecayGeneration()});
+			} else {
+				item->markDecayStart(now);
+				++it;
+			}
+		}
+
+		lastBucket = bucket;
+
+		// Drain only the successors internalDecayItem enqueued for THIS bucket, so
+		// a multi-stage decayTo chain stays aligned during catch-up instead of
+		// falling (bucketsToProcess - 1) ticks behind. toDecayItems was emptied
+		// before the loop, so nothing here is a pre-existing gameplay enqueue.
+		cleanup(virtualNow);
+
+		virtualNow += EVENT_DECAYINTERVAL;
+	}
+
+	// Promote the pre-existing snapshot (and any successor left over from the
+	// last bucket's cleanup) once, relative to the final lastBucket. Their decay
+	// clock starts now — at the end of the catch-up — so they are not chased.
+	for (auto& entry : preExisting) {
+		toDecayItems.push_back(std::move(entry));
+	}
 	cleanup();
 }
 
@@ -4597,18 +4662,45 @@ void Game::shutdown()
 	std::cout << " done!" << std::endl;
 }
 
-void Game::cleanup()
+void Game::cleanup() { cleanup(std::chrono::steady_clock::now()); }
+
+void Game::cleanup(std::chrono::steady_clock::time_point virtualNow)
 {
-	for (const auto& item : toDecayItems) {
+	// internalDecayItem -> startDecay can push back into toDecayItems while we're
+	// iterating, which would invalidate the cached end iterator and lose the new
+	// entry to the trailing clear(). Drain the queue into a local first so any
+	// re-entrant push_back goes to a fresh container processed on the next tick.
+	auto pending = std::exchange(toDecayItems, {});
+	for (const auto& [item, generation] : pending) {
+		if (item->getDecaying() != DECAYING_TRUE || generation != item->getDecayGeneration()) {
+			continue;
+		}
+
+		// Enqueue sites (internalMoveItem/internalAddItem/transformItem/clone) only
+		// gate on getDuration() > 0. Items that have a duration but cannot actually
+		// decay (uniqueId, isRemoved, no decayTo) must not enter the wheel — otherwise
+		// markDecayStart() arms the clock and getDuration() would silently bleed down
+		// until the wheel revisits the entry up to 30 minutes later.
+		if (!item->canDecay()) {
+			item->flushDecayDuration();
+			item->removeAttribute(ITEM_ATTRIBUTE_DECAYSTATE);
+			continue;
+		}
+
+		item->flushDecayDuration();
 		const auto dur = item->getDuration();
-		if (dur >= EVENT_DECAYINTERVAL * EVENT_DECAY_BUCKETS) {
-			decayItems[lastBucket].push_back(item);
+		if (dur <= std::chrono::milliseconds::zero()) {
+			internalDecayItem(item);
+		} else if (dur >= EVENT_DECAYINTERVAL * EVENT_DECAY_BUCKETS) {
+			item->markDecayStart(virtualNow);
+			decayItems[lastBucket].push_back({item, item->getDecayGeneration()});
 		} else {
-			decayItems[(lastBucket + 1 + duration_cast<std::chrono::seconds>(dur).count()) % EVENT_DECAY_BUCKETS]
-			    .push_back(item);
+			item->markDecayStart(virtualNow);
+			size_t ticks = std::min(static_cast<size_t>((dur + EVENT_DECAYINTERVAL - 1ms) / EVENT_DECAYINTERVAL),
+			                        static_cast<size_t>(EVENT_DECAY_BUCKETS - 1));
+			decayItems[(lastBucket + ticks) % EVENT_DECAY_BUCKETS].push_back({item, item->getDecayGeneration()});
 		}
 	}
-	toDecayItems.clear();
 }
 
 void Game::broadcastMessage(const std::string& text, MessageClasses type) const
