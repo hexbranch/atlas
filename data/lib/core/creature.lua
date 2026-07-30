@@ -149,7 +149,7 @@ function Creature:addDamageCondition(target, type, list, damage, period, rounds)
 	elseif list == DAMAGELIST_LOGARITHMIC_DAMAGE then
 		local n, value = 0, damage
 		while value > 0 do
-			value = math.floor(damage * (2.718281828459 ^ (-0.05 * n)) + 0.5)
+			value = math.floor(damage * math.exp(-0.05 * n) + 0.5)
 			if value ~= 0 then
 				condition:addDamage(1, period or 4000, -value)
 				n = n + 1
