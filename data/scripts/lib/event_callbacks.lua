@@ -116,10 +116,16 @@ local function register(self, triggerIndex)
 	events.maxn = #events + 1
 	events[events.maxn] = {
 		callback = callback,
-		triggerIndex = tonumber(triggerIndex) or 0
+		triggerIndex = tonumber(triggerIndex) or 0,
+		order = events.maxn
 	}
 
-	table.sort(events, function(ecl, ecr) return ecl.triggerIndex < ecr.triggerIndex end)
+	table.sort(events, function(ecl, ecr)
+		if ecl.triggerIndex == ecr.triggerIndex then
+			return ecl.order < ecr.order
+		end
+		return ecl.triggerIndex < ecr.triggerIndex
+	end)
 	self.eventType = nil
 	self.callback = nil
 	return true

@@ -13,12 +13,14 @@ on:
       - .github/workflows/lua-check.yml
       - config.lua.dist
       - "data/**.lua"
+      - tools/tests/test_event_callback_order.lua
 
   pull_request:
     paths:
       - .github/workflows/lua-check.yml
       - config.lua.dist
       - "data/**.lua"
+      - tools/tests/test_event_callback_order.lua
 
 jobs:
   luac:
@@ -32,6 +34,9 @@ jobs:
 
       - name: Test Lua syntax
         run: find data/ -name '*.lua' -print0 | xargs -0 -n1 luac -p
+
+      - name: Test Event callback order
+        run: lua tools/tests/test_event_callback_order.lua
 
   lint:
     runs-on: ubuntu-latest
