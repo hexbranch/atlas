@@ -30,8 +30,8 @@ ec.onCreatureTargetCombat = {returnValue=true}
 ec.onCreatureHear = {}
 ec.onCreatureChangeZone = {}
 ec.onCreatureUpdateStorage = {}
-ec.onCreatureChangeHealth = {}
-ec.onCreatureChangeMana = {}
+ec.onCreatureChangeHealth = {[3] = 1, [4] = 2, [5] = 3, [6] = 4}
+ec.onCreatureChangeMana = {[3] = 1, [4] = 2, [5] = 3, [6] = 4}
 ec.onCreatureThink = {}
 ec.onCreaturePrepareDeath = {}
 ec.onCreatureDeath = {}
@@ -150,18 +150,32 @@ Event = setmetatable({
 		end
 
 		local updateableParams = updateableParameters[callback]
+		local hasUpdateableParams = next(updateableParams) ~= nil
 		return function(...)
 			local results, args, info = {}, table.pack(...), callbacks[callback]
 			for index = 1, eventsCount do
 				repeat
-					results = {events[index].callback(unpack(args))}
+					results = table.pack(events[index].callback(unpack(args, 1, args.n)))
 					local output = results[1]
+					-- Preserve the previous value for missing or invalid numeric results.
+					if hasUpdateableParams then
+						for argumentIndex, resultIndex in pairs(updateableParams) do
+							if type(results[resultIndex]) == "number" then
+								args[argumentIndex] = results[resultIndex]
+							end
+							results[resultIndex] = args[argumentIndex]
+							results.n = math.max(results.n, resultIndex)
+						end
+					end
 					-- If the call returns nil then we continue with the next call
 					if output == nil then
 						break
 					end
 					-- If the call returns false then we exit the loop
 					if not output then
+						if hasUpdateableParams then
+							return unpack(results, 1, results.n)
+						end
 						return false
 					end
 					-- If the call of type returnvalue returns noerror then we continue the loop
@@ -173,12 +187,11 @@ Event = setmetatable({
 					end
 					-- We left the loop why have we reached the end
 					if index == eventsCount then
-						return unpack(results)
+						return unpack(results, 1, results.n)
 					end
 				until true
-				-- Update the results for the next call
-				for i, value in pairs(updateableParams) do
-					args[i] = results[value]
+				if index == eventsCount then
+					return unpack(results, 1, results.n)
 				end
 			end
 		end
