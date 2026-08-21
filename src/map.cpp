@@ -304,10 +304,22 @@ void Map::moveCreature(const std::shared_ptr<Creature>& creature, const std::sha
 	                !oldPos.isInRange(newPos, maxClientViewportX + (newPos.x > oldPos.x),
 	                                  maxClientViewportY + (newPos.y > oldPos.y), 1);
 
-	SpectatorVec spectators, newPosSpectators;
-	getSpectators(spectators, oldPos, true);
-	getSpectators(newPosSpectators, newPos, true);
-	spectators.insert(newPosSpectators.begin(), newPosSpectators.end());
+	SpectatorVec spectators;
+	int32_t dx = newPos.x - oldPos.x;
+	int32_t dy = newPos.y - oldPos.y;
+	if (!teleport && oldPos.z == newPos.z &&
+	    ((dx == 0 && (dy == 1 || dy == -1)) || (dy == 0 && (dx == 1 || dx == -1)))) {
+		int32_t minRangeX = maxViewportX + (dx < 0 ? 1 : 0);
+		int32_t maxRangeX = maxViewportX + (dx > 0 ? 1 : 0);
+		int32_t minRangeY = maxViewportY + (dy < 0 ? 1 : 0);
+		int32_t maxRangeY = maxViewportY + (dy > 0 ? 1 : 0);
+		getSpectators(spectators, oldPos, true, false, minRangeX, maxRangeX, minRangeY, maxRangeY);
+	} else {
+		SpectatorVec newPosSpectators;
+		getSpectators(spectators, oldPos, true);
+		getSpectators(newPosSpectators, newPos, true);
+		spectators.insert(newPosSpectators.begin(), newPosSpectators.end());
+	}
 
 	std::vector<int32_t> oldStackPosVector;
 	oldStackPosVector.reserve(spectators.size());
@@ -399,6 +411,10 @@ void Map::getSpectatorsInternal(SpectatorVec& spectators, const Position& center
 	const QTreeLeafNode* leafS = startLeaf;
 	const QTreeLeafNode* leafE;
 
+	std::vector<std::shared_ptr<Creature>> rawSpectators;
+	rawSpectators.reserve(spectators.size() + 32);
+	rawSpectators.insert(rawSpectators.end(), spectators.begin(), spectators.end());
+
 	for (int_fast32_t ny = starty1; ny <= endy2; ny += FLOOR_SIZE) {
 		leafE = leafS;
 		for (int_fast32_t nx = startx1; nx <= endx2; nx += FLOOR_SIZE) {
@@ -417,7 +433,7 @@ void Map::getSpectatorsInternal(SpectatorVec& spectators, const Position& center
 						continue;
 					}
 
-					spectators.emplace(creature);
+					rawSpectators.push_back(creature);
 				}
 				leafE = leafE->leafE;
 			} else {
@@ -431,6 +447,13 @@ void Map::getSpectatorsInternal(SpectatorVec& spectators, const Position& center
 			leafS = QTreeNode::getLeafStatic<const QTreeLeafNode*, const QTreeNode*>(&root, startx1, ny + FLOOR_SIZE);
 		}
 	}
+
+	auto comp = std::owner_less<std::shared_ptr<Creature>>{};
+	std::sort(rawSpectators.begin(), rawSpectators.end(), comp);
+	rawSpectators.erase(std::unique(rawSpectators.begin(), rawSpectators.end(),
+	                                [&comp](const auto& a, const auto& b) { return !comp(a, b) && !comp(b, a); }),
+	                    rawSpectators.end());
+	spectators = SpectatorVec(boost::container::ordered_unique_range, rawSpectators.begin(), rawSpectators.end());
 }
 
 void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, bool multifloor /*= false*/,
