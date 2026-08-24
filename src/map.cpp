@@ -62,6 +62,26 @@ bool loadHousesXML(const std::filesystem::path& filename)
 	return true;
 }
 
+// Merges spectator snapshots while preserving the first occurrence of each creature.
+void mergeSpectators(SpectatorVec& spectators, const SpectatorVec& additionalSpectators)
+{
+	if (additionalSpectators.empty()) {
+		return;
+	}
+
+	const bool needDedup = !spectators.empty();
+	spectators.insert(spectators.end(), additionalSpectators.begin(), additionalSpectators.end());
+	if (!needDedup) {
+		return;
+	}
+
+	std::unordered_set<const Creature*> seen;
+	seen.reserve(spectators.size());
+	auto uniqueEnd = std::remove_if(spectators.begin(), spectators.end(),
+	                                [&seen](const auto& spectator) { return !seen.insert(spectator.get()).second; });
+	spectators.erase(uniqueEnd, spectators.end());
+}
+
 } // namespace
 
 void Map::loadMap(const std::string& identifier, bool loadHouses, bool isCalledByLua)
@@ -315,10 +335,8 @@ void Map::moveCreature(const std::shared_ptr<Creature>& creature, const std::sha
 		int32_t maxRangeY = maxViewportY + (dy > 0 ? 1 : 0);
 		getSpectators(spectators, oldPos, true, false, minRangeX, maxRangeX, minRangeY, maxRangeY);
 	} else {
-		SpectatorVec newPosSpectators;
 		getSpectators(spectators, oldPos, true);
-		getSpectators(newPosSpectators, newPos, true);
-		spectators.insert(newPosSpectators.begin(), newPosSpectators.end());
+		getSpectators(spectators, newPos, true);
 	}
 
 	std::vector<int32_t> oldStackPosVector;
@@ -411,9 +429,7 @@ void Map::getSpectatorsInternal(SpectatorVec& spectators, const Position& center
 	const QTreeLeafNode* leafS = startLeaf;
 	const QTreeLeafNode* leafE;
 
-	std::vector<std::shared_ptr<Creature>> rawSpectators;
-	rawSpectators.reserve(spectators.size() + 32);
-	rawSpectators.insert(rawSpectators.end(), spectators.begin(), spectators.end());
+	spectators.reserve(spectators.size() + (std::max(maxViewportX, maxViewportY) * 2));
 
 	for (int_fast32_t ny = starty1; ny <= endy2; ny += FLOOR_SIZE) {
 		leafE = leafS;
@@ -433,7 +449,7 @@ void Map::getSpectatorsInternal(SpectatorVec& spectators, const Position& center
 						continue;
 					}
 
-					rawSpectators.push_back(creature);
+					spectators.emplace_back(creature);
 				}
 				leafE = leafE->leafE;
 			} else {
@@ -447,13 +463,6 @@ void Map::getSpectatorsInternal(SpectatorVec& spectators, const Position& center
 			leafS = QTreeNode::getLeafStatic<const QTreeLeafNode*, const QTreeNode*>(&root, startx1, ny + FLOOR_SIZE);
 		}
 	}
-
-	auto comp = std::owner_less<std::shared_ptr<Creature>>{};
-	std::sort(rawSpectators.begin(), rawSpectators.end(), comp);
-	rawSpectators.erase(std::unique(rawSpectators.begin(), rawSpectators.end(),
-	                                [&comp](const auto& a, const auto& b) { return !comp(a, b) && !comp(b, a); }),
-	                    rawSpectators.end());
-	spectators = SpectatorVec(boost::container::ordered_unique_range, rawSpectators.begin(), rawSpectators.end());
 }
 
 void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, bool multifloor /*= false*/,
@@ -477,11 +486,7 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 		if (onlyPlayers) {
 			auto it = playersSpectatorCache.find(centerPos);
 			if (it != playersSpectatorCache.end()) {
-				if (spectators.empty()) {
-					spectators = it->second;
-				} else {
-					spectators.insert(it->second.begin(), it->second.end());
-				}
+				mergeSpectators(spectators, it->second);
 				foundCache = true;
 			}
 		}
@@ -490,19 +495,16 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 			auto it = spectatorCache.find(centerPos);
 			if (it != spectatorCache.end()) {
 				if (!onlyPlayers) {
-					if (spectators.empty()) {
-						spectators = it->second;
-					} else {
-						spectators.insert(it->second.begin(), it->second.end());
-					}
+					mergeSpectators(spectators, it->second);
 				} else {
-					// Filter players from cached spectators
-					const SpectatorVec& cachedSpectators = it->second;
-					for (const auto& spectator : cachedSpectators) {
+					SpectatorVec playerSpectators;
+					playerSpectators.reserve(it->second.size());
+					for (const auto& spectator : it->second) {
 						if (spectator->asPlayer()) {
-							spectators.emplace(spectator);
+							playerSpectators.emplace_back(spectator);
 						}
 					}
+					mergeSpectators(spectators, playerSpectators);
 				}
 				foundCache = true;
 			} else {
@@ -535,15 +537,21 @@ void Map::getSpectators(SpectatorVec& spectators, const Position& centerPos, boo
 			maxRangeZ = centerPos.z;
 		}
 
-		getSpectatorsInternal(spectators, centerPos, minRangeX, maxRangeX, minRangeY, maxRangeY, minRangeZ, maxRangeZ,
+		SpectatorVec querySpectators;
+		SpectatorVec& result = spectators.empty() ? spectators : querySpectators;
+		getSpectatorsInternal(result, centerPos, minRangeX, maxRangeX, minRangeY, maxRangeY, minRangeZ, maxRangeZ,
 		                      onlyPlayers);
 
 		if (cacheResult) {
 			if (onlyPlayers) {
-				playersSpectatorCache[centerPos] = spectators;
+				playersSpectatorCache[centerPos] = result;
 			} else {
-				spectatorCache[centerPos] = spectators;
+				spectatorCache[centerPos] = result;
 			}
+		}
+
+		if (&result != &spectators) {
+			mergeSpectators(spectators, result);
 		}
 	}
 }
