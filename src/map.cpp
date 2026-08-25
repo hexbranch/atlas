@@ -12,6 +12,8 @@
 #include "iomapserialize.h"
 #include "pugicast.h"
 
+#include <boost/unordered/unordered_flat_set.hpp>
+
 extern Game g_game;
 
 namespace {
@@ -69,17 +71,23 @@ void mergeSpectators(SpectatorVec& spectators, const SpectatorVec& additionalSpe
 		return;
 	}
 
-	const bool needDedup = !spectators.empty();
-	spectators.insert(spectators.end(), additionalSpectators.begin(), additionalSpectators.end());
-	if (!needDedup) {
+	if (spectators.empty()) {
+		spectators.insert(spectators.end(), additionalSpectators.begin(), additionalSpectators.end());
 		return;
 	}
 
-	std::unordered_set<const Creature*> seen;
-	seen.reserve(spectators.size());
-	auto uniqueEnd = std::remove_if(spectators.begin(), spectators.end(),
-	                                [&seen](const auto& spectator) { return !seen.insert(spectator.get()).second; });
-	spectators.erase(uniqueEnd, spectators.end());
+	boost::unordered_flat_set<const Creature*> existingSpectators;
+	existingSpectators.reserve(spectators.size());
+	for (const auto& spectator : spectators) {
+		existingSpectators.emplace(spectator.get());
+	}
+
+	spectators.reserve(spectators.size() + additionalSpectators.size());
+	for (const auto& spectator : additionalSpectators) {
+		if (!existingSpectators.contains(spectator.get())) {
+			spectators.emplace_back(spectator);
+		}
+	}
 }
 
 } // namespace
