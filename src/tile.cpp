@@ -595,7 +595,7 @@ ReturnValue Tile::queryAdd(int32_t, const std::shared_ptr<const Thing>& thing, u
 		}
 	} else if (const auto& item = thing->asItem()) {
 		const TileItemVector* items = getItemList();
-		if (items && items->size() >= 0xFFFF) {
+		if (items && items->size() >= TILE_MAX_ITEMS) {
 			return RETURNVALUE_NOTPOSSIBLE;
 		}
 
@@ -807,7 +807,7 @@ void Tile::addThing(int32_t, const std::shared_ptr<Thing>& thing)
 		creatures->insert(creatures->begin(), creature);
 	} else if (const auto& item = thing->asItem()) {
 		TileItemVector* items = getItemList();
-		if (items && items->size() >= 0xFFFF) {
+		if (items && items->size() >= TILE_MAX_ITEMS) {
 			return /*RETURNVALUE_NOTPOSSIBLE*/;
 		}
 
@@ -1343,7 +1343,7 @@ void Tile::internalAddThing(uint32_t, const std::shared_ptr<Thing>& thing)
 		}
 
 		TileItemVector* items = makeItemList();
-		if (items->size() >= 0xFFFF) {
+		if (items->size() >= TILE_MAX_ITEMS) {
 			return /*RETURNVALUE_NOTPOSSIBLE*/;
 		}
 
