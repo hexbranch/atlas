@@ -8,6 +8,7 @@
 #include "../lua/env.h"
 #include "../lua/error.h"
 #include "../lua/script.h"
+#include "../monster.h"
 #include "events.h"
 
 namespace {
@@ -262,59 +263,65 @@ void onUpdateStorage(const std::shared_ptr<Creature>& creature, uint32_t key, st
 void onChangeHealth(const std::shared_ptr<Creature>& creature, const std::shared_ptr<Creature>& attacker,
                     CombatDamage& damage)
 {
+	if (const auto& monster = creature->asMonster()) {
+		monster->onHealthChange(attacker, damage);
+	}
+
 	// Creature:onChangeHealth(attacker, primaryDamage, primaryType, secondaryDamage, secondaryType, origin)
-	if (creatureHandlers.onChangeHealth == -1) {
-		return;
-	}
-
-	if (!tfs::lua::reserveScriptEnv()) {
-		std::cout << "[Error - tfs::events::creature::onChangeHealth] Call stack overflow" << std::endl;
-		return;
-	}
-
-	const auto env = tfs::lua::getScriptEnv();
-	env->setScriptId(creatureHandlers.onChangeHealth, &tfs::events::getScriptInterface());
-
-	const auto L = tfs::events::getScriptInterface().getLuaState();
-	tfs::events::getScriptInterface().pushFunction(creatureHandlers.onChangeHealth);
-
-	tfs::lua::pushThing(L, creature);
-
-	if (attacker) {
-		tfs::lua::pushThing(L, attacker);
-	} else {
-		lua_pushnil(L);
-	}
-
-	tfs::lua::pushNumber(L, damage.primary.value);
-	tfs::lua::pushNumber(L, damage.primary.type);
-	tfs::lua::pushNumber(L, damage.secondary.value);
-	tfs::lua::pushNumber(L, damage.secondary.type);
-	tfs::lua::pushNumber(L, damage.origin);
-
-	if (tfs::lua::protectedCall(L, 7, 4) != 0) {
-		tfs::lua::reportError(L, tfs::lua::popString(L));
-	} else {
-		damage.primary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -4, damage.primary.value));
-		damage.primary.type = tfs::lua::getNumber<CombatType_t>(L, -3, damage.primary.type);
-		damage.secondary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -2, damage.secondary.value));
-		damage.secondary.type = tfs::lua::getNumber<CombatType_t>(L, -1, damage.secondary.type);
-		lua_pop(L, 4);
-
-		if (damage.primary.type != COMBAT_HEALING && damage.primary.type != COMBAT_NONE) {
-			damage.primary.value = -damage.primary.value;
+	if (creatureHandlers.onChangeHealth != -1) {
+		if (!tfs::lua::reserveScriptEnv()) {
+			std::cout << "[Error - tfs::events::creature::onChangeHealth] Call stack overflow" << std::endl;
+			return;
 		}
-		if (damage.secondary.type != COMBAT_HEALING && damage.secondary.type != COMBAT_NONE) {
-			damage.secondary.value = -damage.secondary.value;
+
+		const auto env = tfs::lua::getScriptEnv();
+		env->setScriptId(creatureHandlers.onChangeHealth, &tfs::events::getScriptInterface());
+
+		const auto L = tfs::events::getScriptInterface().getLuaState();
+		tfs::events::getScriptInterface().pushFunction(creatureHandlers.onChangeHealth);
+
+		tfs::lua::pushThing(L, creature);
+
+		if (attacker) {
+			tfs::lua::pushThing(L, attacker);
+		} else {
+			lua_pushnil(L);
 		}
+
+		tfs::lua::pushNumber(L, damage.primary.value);
+		tfs::lua::pushNumber(L, damage.primary.type);
+		tfs::lua::pushNumber(L, damage.secondary.value);
+		tfs::lua::pushNumber(L, damage.secondary.type);
+		tfs::lua::pushNumber(L, damage.origin);
+
+		if (tfs::lua::protectedCall(L, 7, 4) != 0) {
+			tfs::lua::reportError(L, tfs::lua::popString(L));
+		} else {
+			damage.primary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -4, damage.primary.value));
+			damage.primary.type = tfs::lua::getNumber<CombatType_t>(L, -3, damage.primary.type);
+			damage.secondary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -2, damage.secondary.value));
+			damage.secondary.type = tfs::lua::getNumber<CombatType_t>(L, -1, damage.secondary.type);
+			lua_pop(L, 4);
+		}
+
+		tfs::lua::resetScriptEnv();
 	}
 
-	tfs::lua::resetScriptEnv();
+	if (damage.primary.type != COMBAT_HEALING && damage.primary.type != COMBAT_NONE) {
+		damage.primary.value = -damage.primary.value;
+	}
+	if (damage.secondary.type != COMBAT_HEALING && damage.secondary.type != COMBAT_NONE) {
+		damage.secondary.value = -damage.secondary.value;
+	}
 }
 
 void onChangeMana(const std::shared_ptr<Creature>& creature, const std::shared_ptr<Creature>& attacker,
                   CombatDamage& damage)
 {
+	if (const auto& monster = creature->asMonster()) {
+		monster->onManaChange(attacker, damage);
+	}
+
 	// Creature:onChangeMana(attacker, primaryDamage, primaryType, secondaryDamage, secondaryType, origin)
 	if (creatureHandlers.onChangeMana == -1) {
 		return;

@@ -149,6 +149,8 @@ class MonsterType
 		int32_t creatureMoveEvent = -1;
 		int32_t creatureSayEvent = -1;
 		int32_t thinkEvent = -1;
+		int32_t healthChangeEvent = -1;
+		int32_t manaChangeEvent = -1;
 		int32_t targetDistance = 1;
 		int32_t runAwayHealth = 0;
 		int32_t health = 100;
@@ -184,6 +186,8 @@ public:
 	MonsterType& operator=(const MonsterType&) = delete;
 
 	bool loadCallback(LuaScriptInterface* scriptInterface);
+	bool hasHealthChangeCallback() const { return info.healthChangeEvent != -1; }
+	bool hasManaChangeCallback() const { return info.manaChangeEvent != -1; }
 
 	std::string name;
 	std::string nameDescription;
