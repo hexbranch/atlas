@@ -268,51 +268,53 @@ void onChangeHealth(const std::shared_ptr<Creature>& creature, const std::shared
 	}
 
 	// Creature:onChangeHealth(attacker, primaryDamage, primaryType, secondaryDamage, secondaryType, origin)
-	if (creatureHandlers.onChangeHealth != -1) {
-		if (!tfs::lua::reserveScriptEnv()) {
-			std::cout << "[Error - tfs::events::creature::onChangeHealth] Call stack overflow" << std::endl;
-			return;
-		}
-
-		const auto env = tfs::lua::getScriptEnv();
-		env->setScriptId(creatureHandlers.onChangeHealth, &tfs::events::getScriptInterface());
-
-		const auto L = tfs::events::getScriptInterface().getLuaState();
-		tfs::events::getScriptInterface().pushFunction(creatureHandlers.onChangeHealth);
-
-		tfs::lua::pushThing(L, creature);
-
-		if (attacker) {
-			tfs::lua::pushThing(L, attacker);
-		} else {
-			lua_pushnil(L);
-		}
-
-		tfs::lua::pushNumber(L, damage.primary.value);
-		tfs::lua::pushNumber(L, damage.primary.type);
-		tfs::lua::pushNumber(L, damage.secondary.value);
-		tfs::lua::pushNumber(L, damage.secondary.type);
-		tfs::lua::pushNumber(L, damage.origin);
-
-		if (tfs::lua::protectedCall(L, 7, 4) != 0) {
-			tfs::lua::reportError(L, tfs::lua::popString(L));
-		} else {
-			damage.primary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -4, damage.primary.value));
-			damage.primary.type = tfs::lua::getNumber<CombatType_t>(L, -3, damage.primary.type);
-			damage.secondary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -2, damage.secondary.value));
-			damage.secondary.type = tfs::lua::getNumber<CombatType_t>(L, -1, damage.secondary.type);
-			lua_pop(L, 4);
-		}
-
-		tfs::lua::resetScriptEnv();
+	if (creatureHandlers.onChangeHealth == -1) {
+		return;
 	}
 
-	if (damage.primary.type != COMBAT_HEALING && damage.primary.type != COMBAT_NONE) {
-		damage.primary.value = -damage.primary.value;
+	if (!tfs::lua::reserveScriptEnv()) {
+		std::cout << "[Error - tfs::events::creature::onChangeHealth] Call stack overflow" << std::endl;
+		return;
 	}
-	if (damage.secondary.type != COMBAT_HEALING && damage.secondary.type != COMBAT_NONE) {
-		damage.secondary.value = -damage.secondary.value;
+
+	const auto env = tfs::lua::getScriptEnv();
+	env->setScriptId(creatureHandlers.onChangeHealth, &tfs::events::getScriptInterface());
+
+	const auto L = tfs::events::getScriptInterface().getLuaState();
+	tfs::events::getScriptInterface().pushFunction(creatureHandlers.onChangeHealth);
+
+	tfs::lua::pushThing(L, creature);
+
+	if (attacker) {
+		tfs::lua::pushThing(L, attacker);
+	} else {
+		lua_pushnil(L);
 	}
+
+	tfs::lua::pushNumber(L, damage.primary.value);
+	tfs::lua::pushNumber(L, damage.primary.type);
+	tfs::lua::pushNumber(L, damage.secondary.value);
+	tfs::lua::pushNumber(L, damage.secondary.type);
+	tfs::lua::pushNumber(L, damage.origin);
+
+	if (tfs::lua::protectedCall(L, 7, 4) != 0) {
+		tfs::lua::reportError(L, tfs::lua::popString(L));
+	} else {
+		damage.primary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -4, damage.primary.value));
+		damage.primary.type = tfs::lua::getNumber<CombatType_t>(L, -3, damage.primary.type);
+		damage.secondary.value = std::abs(tfs::lua::getNumber<int32_t>(L, -2, damage.secondary.value));
+		damage.secondary.type = tfs::lua::getNumber<CombatType_t>(L, -1, damage.secondary.type);
+		lua_pop(L, 4);
+
+		if (damage.primary.type != COMBAT_HEALING && damage.primary.type != COMBAT_NONE) {
+			damage.primary.value = -damage.primary.value;
+		}
+		if (damage.secondary.type != COMBAT_HEALING && damage.secondary.type != COMBAT_NONE) {
+			damage.secondary.value = -damage.secondary.value;
+		}
+	}
+
+	tfs::lua::resetScriptEnv();
 }
 
 void onChangeMana(const std::shared_ptr<Creature>& creature, const std::shared_ptr<Creature>& attacker,
