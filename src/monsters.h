@@ -186,8 +186,6 @@ public:
 	MonsterType& operator=(const MonsterType&) = delete;
 
 	bool loadCallback(LuaScriptInterface* scriptInterface);
-	bool hasHealthChangeCallback() const { return info.healthChangeEvent != -1; }
-	bool hasManaChangeCallback() const { return info.manaChangeEvent != -1; }
 
 	std::string name;
 	std::string nameDescription;
