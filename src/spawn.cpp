@@ -305,10 +305,6 @@ bool Spawn::spawnMonster(uint32_t spawnId, MonsterType* mType, const Position& p
                          bool startup /*= false*/)
 {
 	const auto monster = std::make_shared<Monster>(mType);
-	if (!tfs::events::monster::onSpawn(monster, pos, startup, false)) {
-		return false;
-	}
-
 	monster->setDirection(dir);
 
 	if (startup) {
@@ -328,6 +324,8 @@ bool Spawn::spawnMonster(uint32_t spawnId, MonsterType* mType, const Position& p
 
 	spawnedMap.insert({spawnId, monster});
 	spawnMap[spawnId].lastSpawn = std::chrono::steady_clock::now();
+
+	tfs::events::monster::onSpawn(monster, pos, startup, false);
 	return true;
 }
 

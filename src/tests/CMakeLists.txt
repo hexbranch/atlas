@@ -8,7 +8,8 @@ set(tests_SRC
     ${CMAKE_CURRENT_LIST_DIR}/test_sha1.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test_xtea.cpp
     ${CMAKE_CURRENT_LIST_DIR}/test_scope_exit.cpp
-    )
+    ${CMAKE_CURRENT_LIST_DIR}/test_spawn_lifecycle.cpp
+)
 
 foreach(test_src ${tests_SRC})
     get_filename_component(test_name ${test_src} NAME_WE)

@@ -37,28 +37,22 @@ void loadMonsterScripts()
 
 namespace tfs::events::monster {
 
-void load()
-{
-	loadMonsterScripts();
-}
+void load() { loadMonsterScripts(); }
 
-void reload()
-{
-	loadMonsterScripts();
-}
+void reload() { loadMonsterScripts(); }
 
 int32_t getOnSpawnScriptId() { return monsterHandlers.onSpawn; }
 
-bool onSpawn(const std::shared_ptr<Monster>& monster, const Position& position, bool startup, bool artificial)
+void onSpawn(const std::shared_ptr<Monster>& monster, const Position& position, bool startup, bool artificial)
 {
 	// Monster:onSpawn(position, startup, artificial)
 	if (monsterHandlers.onSpawn == -1) {
-		return true;
+		return;
 	}
 
 	if (!tfs::lua::reserveScriptEnv()) {
 		std::cout << "[Error - tfs::events::monster::onSpawn] Call stack overflow" << std::endl;
-		return false;
+		return;
 	}
 
 	const auto env = tfs::lua::getScriptEnv();
@@ -71,7 +65,7 @@ bool onSpawn(const std::shared_ptr<Monster>& monster, const Position& position, 
 	tfs::lua::pushPosition(L, position);
 	tfs::lua::pushBoolean(L, startup);
 	tfs::lua::pushBoolean(L, artificial);
-	return tfs::events::getScriptInterface().callFunction(4);
+	tfs::events::getScriptInterface().callVoidFunction(4);
 }
 
 void onDropLoot(const std::shared_ptr<Monster>& monster, const std::shared_ptr<Container>& corpse)

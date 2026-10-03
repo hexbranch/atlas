@@ -453,16 +453,15 @@ int luaGameCreateMonster(lua_State* L)
 	bool extended = tfs::lua::getBoolean(L, 3, false);
 	bool force = tfs::lua::getBoolean(L, 4, false);
 	MagicEffectClasses magicEffect = tfs::lua::getNumber<MagicEffectClasses>(L, 5, CONST_ME_TELEPORT);
-	if (tfs::events::monster::onSpawn(monster, position, false, true) || force) {
-		if (g_game.placeCreature(monster, position, extended, force, magicEffect)) {
-			tfs::lua::pushSharedPtr(L, monster);
-			tfs::lua::setMetatable(L, -1, "Monster");
-		} else {
-			lua_pushnil(L);
-		}
-	} else {
+	if (!g_game.placeCreature(monster, position, extended, force, magicEffect)) {
 		lua_pushnil(L);
+		return 1;
 	}
+
+	tfs::events::monster::onSpawn(monster, position, false, true);
+
+	tfs::lua::pushSharedPtr(L, monster);
+	tfs::lua::setMetatable(L, -1, "Monster");
 	return 1;
 }
 

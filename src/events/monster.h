@@ -14,6 +14,6 @@ void reload();
 int32_t getOnSpawnScriptId();
 
 void onDropLoot(const std::shared_ptr<Monster>& monster, const std::shared_ptr<Container>& corpse);
-bool onSpawn(const std::shared_ptr<Monster>& monster, const Position& position, bool startup, bool artificial);
+void onSpawn(const std::shared_ptr<Monster>& monster, const Position& position, bool startup, bool artificial);
 
 } // namespace tfs::events::monster
