@@ -1166,6 +1166,10 @@ int32_t Tile::getClientIndexOfCreature(const std::shared_ptr<const Player>& play
 int32_t Tile::getStackposOfCreature(const std::shared_ptr<const Player>& player,
                                     const std::shared_ptr<const Creature>& creature) const
 {
+	if (!player || !creature) {
+		return -1;
+	}
+
 	const bool isOwnTile = (getPosition() == player->getPosition());
 	int32_t n = ground ? 1 : 0;
 
@@ -1200,7 +1204,7 @@ int32_t Tile::getStackposOfCreature(const std::shared_ptr<const Player>& player,
 			// current visibility. Callers such as ghost-mode removal need the
 			// stackpos of a creature that has just become invisible.
 			if (tileCreature == creature) {
-				return n;
+				return n < MAX_STACKPOS ? n : -1;
 			}
 
 			if (!player->canSeeCreature(tileCreature)) {
@@ -1212,8 +1216,15 @@ int32_t Tile::getStackposOfCreature(const std::shared_ptr<const Player>& player,
 			}
 
 			if (++n >= MAX_STACKPOS) {
+				if (isOwnTile && !playerAdded && creature->getID() == player->getID()) {
+					return MAX_STACKPOS - 1;
+				}
 				return -1;
 			}
+		}
+
+		if (isOwnTile && !playerAdded && creature->getID() == player->getID()) {
+			return MAX_STACKPOS - 1;
 		}
 	}
 	return -1;

@@ -2678,18 +2678,20 @@ void ProtocolGame::sendAddCreature(const std::shared_ptr<const Creature>& creatu
 		return;
 	}
 
-	if (stackpos != -1) {
-		NetworkMessage msg;
-		msg.addByte(0x6A);
-		msg.addPosition(pos);
-		msg.addByte(stackpos);
-
-		bool known;
-		uint32_t removedKnown;
-		checkCreatureAsKnown(creature->getID(), known, removedKnown);
-		AddCreature(msg, creature, known, removedKnown);
-		writeToOutputBuffer(msg);
+	if (stackpos >= MAX_STACKPOS) {
+		return;
 	}
+
+	NetworkMessage msg;
+	msg.addByte(0x6A);
+	msg.addPosition(pos);
+	msg.addByte(stackpos);
+
+	bool known;
+	uint32_t removedKnown;
+	checkCreatureAsKnown(creature->getID(), known, removedKnown);
+	AddCreature(msg, creature, known, removedKnown);
+	writeToOutputBuffer(msg);
 
 	if (magicEffect != CONST_ME_NONE) {
 		sendMagicEffect(pos, magicEffect);
@@ -2757,7 +2759,7 @@ void ProtocolGame::sendMoveCreature(const std::shared_ptr<const Creature>& creat
 			}
 			writeToOutputBuffer(msg);
 		}
-	} else if (canSee(oldPos) && canSee(creature->getPosition())) {
+	} else if (canSee(oldPos) && canSee(newPos)) {
 		if (teleport || (oldPos.z == 7 && newPos.z >= 8) || oldStackPos >= MAX_STACKPOS) {
 			sendRemoveTileThing(oldPos, oldStackPos);
 			sendAddCreature(creature, newPos, newStackPos);
@@ -2766,12 +2768,12 @@ void ProtocolGame::sendMoveCreature(const std::shared_ptr<const Creature>& creat
 			msg.addByte(0x6D);
 			msg.addPosition(oldPos);
 			msg.addByte(oldStackPos);
-			msg.addPosition(creature->getPosition());
+			msg.addPosition(newPos);
 			writeToOutputBuffer(msg);
 		}
 	} else if (canSee(oldPos)) {
 		sendRemoveTileThing(oldPos, oldStackPos);
-	} else if (canSee(creature->getPosition())) {
+	} else if (canSee(newPos)) {
 		sendAddCreature(creature, newPos, newStackPos);
 	}
 }
